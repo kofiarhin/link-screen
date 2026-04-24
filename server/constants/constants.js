@@ -1,0 +1,12 @@
+module.exports = {
+  SOCKET_EVENTS: {
+    HOST_JOIN: 'host:join',
+    VIEWER_JOIN: 'viewer:join',
+    VIEWER_READY: 'viewer:ready',
+    OFFER: 'webrtc:offer',
+    ANSWER: 'webrtc:answer',
+    ICE_CANDIDATE: 'webrtc:ice-candidate',
+    SESSION_END: 'session:end',
+    ERROR: 'session:error',
+  },
+};

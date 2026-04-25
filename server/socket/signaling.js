@@ -1,94 +1,143 @@
 const Session = require('../models/Session');
 const { SOCKET_EVENTS } = require('../constants/constants');
 
-// sessionId -> { hostSocketId }
-const roomMeta = new Map();
+const isExpired = (session) => session.expiresAt <= new Date();
 
 module.exports = (io) => {
   io.on('connection', (socket) => {
-    socket.on(SOCKET_EVENTS.HOST_JOIN, async ({ sessionId }) => {
+    const emitSessionMissing = () => {
+      socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session not found or expired' });
+    };
+
+    const handleHostJoin = async ({ sessionId, hostToken }) => {
       try {
         const session = await Session.findById(sessionId);
-        if (!session || !session.active) {
-          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session not found or expired' });
+        if (!session || !session.active || isExpired(session)) {
+          emitSessionMissing();
           return;
         }
 
-        const room = io.sockets.adapter.rooms.get(sessionId);
-        if (room && room.size >= 2) {
-          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session is full' });
+        if (!hostToken || hostToken !== session.hostToken) {
+          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Invalid host token' });
           return;
         }
+
+        session.hostSocketId = socket.id;
+        session.status = session.viewerSocketId ? 'connected' : 'waiting';
+        await session.save();
 
         socket.join(sessionId);
         socket.sessionId = sessionId;
         socket.role = 'host';
-        roomMeta.set(sessionId, { hostSocketId: socket.id });
+
+        if (session.viewerSocketId) {
+          io.to(socket.id).emit(SOCKET_EVENTS.VIEWER_READY);
+        }
       } catch (err) {
         socket.emit(SOCKET_EVENTS.ERROR, { message: 'Failed to join session' });
       }
-    });
+    };
 
-    socket.on(SOCKET_EVENTS.VIEWER_JOIN, async ({ sessionId }) => {
+    const handleViewerJoin = async ({ sessionId }) => {
       try {
         const session = await Session.findById(sessionId);
-        if (!session || !session.active) {
-          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session not found or expired' });
+        if (!session || !session.active || isExpired(session)) {
+          emitSessionMissing();
           return;
         }
 
-        const room = io.sockets.adapter.rooms.get(sessionId);
-        if (room && room.size >= 2) {
-          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session is full' });
+        if (!session.hostSocketId) {
+          socket.emit(SOCKET_EVENTS.ERROR, { message: 'Host is not connected' });
           return;
         }
+
+        if (session.viewerSocketId && session.viewerSocketId !== socket.id) {
+          const existing = io.sockets.sockets.get(session.viewerSocketId);
+          if (existing?.connected) {
+            socket.emit(SOCKET_EVENTS.ERROR, { message: 'Session is full' });
+            return;
+          }
+        }
+
+        session.viewerSocketId = socket.id;
+        session.status = 'connected';
+        await session.save();
 
         socket.join(sessionId);
         socket.sessionId = sessionId;
         socket.role = 'viewer';
 
-        const meta = roomMeta.get(sessionId);
-        if (meta) {
-          io.to(meta.hostSocketId).emit(SOCKET_EVENTS.VIEWER_READY);
-        }
+        io.to(session.hostSocketId).emit(SOCKET_EVENTS.VIEWER_READY);
       } catch (err) {
         socket.emit(SOCKET_EVENTS.ERROR, { message: 'Failed to join session' });
       }
-    });
+    };
 
-    socket.on(SOCKET_EVENTS.OFFER, ({ sessionId, sdp }) => {
+    const handleOffer = ({ sessionId, sdp }) => {
       socket.to(sessionId).emit(SOCKET_EVENTS.OFFER, { sdp });
-    });
+    };
 
-    socket.on(SOCKET_EVENTS.ANSWER, ({ sessionId, sdp }) => {
+    const handleAnswer = ({ sessionId, sdp }) => {
       socket.to(sessionId).emit(SOCKET_EVENTS.ANSWER, { sdp });
-    });
+    };
 
-    socket.on(SOCKET_EVENTS.ICE_CANDIDATE, ({ sessionId, candidate }) => {
+    const handleIceCandidate = ({ sessionId, candidate }) => {
       socket.to(sessionId).emit(SOCKET_EVENTS.ICE_CANDIDATE, { candidate });
-    });
+    };
 
-    socket.on(SOCKET_EVENTS.SESSION_END, async ({ sessionId }) => {
+    const handleSessionEnd = async ({ sessionId }) => {
       try {
-        await Session.findByIdAndUpdate(sessionId, { active: false });
-        socket.to(sessionId).emit(SOCKET_EVENTS.SESSION_END);
-        roomMeta.delete(sessionId);
-      } catch (err) {
-        // session cleanup failure is non-critical
-      }
-    });
+        const session = await Session.findById(sessionId);
+        if (!session) return;
 
-    socket.on('disconnect', async () => {
+        session.active = false;
+        session.status = 'ended';
+        session.hostSocketId = null;
+        session.viewerSocketId = null;
+        await session.save();
+
+        socket.to(sessionId).emit(SOCKET_EVENTS.SESSION_END);
+      } catch {
+        // non-critical
+      }
+    };
+
+    const handleDisconnect = async () => {
       const { sessionId, role } = socket;
-      if (!sessionId || role !== 'host') return;
+      if (!sessionId || !role) return;
 
-      try {
-        await Session.findByIdAndUpdate(sessionId, { active: false });
+      const session = await Session.findById(sessionId);
+      if (!session) return;
+
+      if (role === 'host') {
+        session.active = false;
+        session.status = 'ended';
+        session.hostSocketId = null;
+        session.viewerSocketId = null;
+        await session.save();
         socket.to(sessionId).emit(SOCKET_EVENTS.SESSION_END);
-        roomMeta.delete(sessionId);
-      } catch (err) {
-        // cleanup failure is non-critical
+        return;
       }
-    });
+
+      if (role === 'viewer' && session.viewerSocketId === socket.id) {
+        session.viewerSocketId = null;
+        session.status = 'waiting';
+        await session.save();
+
+        if (session.hostSocketId) {
+          io.to(session.hostSocketId).emit(SOCKET_EVENTS.VIEWER_LEFT, {
+            reason: 'viewer-disconnected',
+          });
+        }
+      }
+    };
+
+    socket.on(SOCKET_EVENTS.HOST_JOIN, handleHostJoin);
+    socket.on(SOCKET_EVENTS.VIEWER_JOIN, handleViewerJoin);
+    socket.on(SOCKET_EVENTS.OFFER, handleOffer);
+    socket.on(SOCKET_EVENTS.ANSWER, handleAnswer);
+    socket.on(SOCKET_EVENTS.ICE_CANDIDATE, handleIceCandidate);
+    socket.on(SOCKET_EVENTS.SESSION_END, handleSessionEnd);
+    socket.on('disconnect', handleDisconnect);
   });
 };

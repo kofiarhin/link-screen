@@ -6,7 +6,10 @@
     "start": "node server/server.js",
     "client": "npm run dev --prefix client",
     "server": "nodemon server/server.js",
-    "dev": "concurrently \"npm run server\" \"npm run client\""
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "test": "npm run test:server && npm run test:client",
+    "test:server": "jest --config server/jest.config.js",
+    "test:client": "cd client && vitest run --config vite.config.js"
   },
   "keywords": [],
   "author": "",
@@ -14,7 +17,12 @@
   "description": "",
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "nodemon": "^3.1.14"
+    "jest": "^30.0.5",
+    "jsdom": "^29.0.2",
+    "mongodb-memory-server": "^10.2.1",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.1.4",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "cors": "^2.8.6",

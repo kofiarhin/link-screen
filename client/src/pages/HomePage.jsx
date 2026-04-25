@@ -1,14 +1,13 @@
-import { useNavigate } from 'react-router-dom';
+import React from 'react';
 import { useCreateSession } from '../hooks/mutations/useCreateSession';
 
 export default function HomePage() {
-  const navigate = useNavigate();
   const { mutate: startSession, isPending, error } = useCreateSession();
 
   const handleStart = () => {
     startSession(undefined, {
       onSuccess: (data) => {
-        navigate(`/session/${data.id}?role=host`);
+        window.location.assign(data.hostUrl);
       },
     });
   };

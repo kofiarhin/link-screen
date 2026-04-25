@@ -12,5 +12,5 @@ export const getSession = async (id) => {
 
 export const endSession = async (id) => {
   const res = await api.delete(`/api/sessions/${id}`);
-  return res.data;
+  return res.data.data;
 };

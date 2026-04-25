@@ -1,3 +1,4 @@
+import React from 'react';
 import { useEffect, useRef } from 'react';
 import StatusOverlay from './StatusOverlay';
 
@@ -10,7 +11,7 @@ export default function ViewerView({ stream, status, onRetry }) {
     }
   }, [stream]);
 
-  const showOverlay = status !== 'streaming';
+  const showOverlay = status !== 'watching';
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center relative">

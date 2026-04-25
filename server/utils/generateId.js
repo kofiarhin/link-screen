@@ -1,3 +1,3 @@
 const { nanoid } = require('nanoid');
 
-module.exports = () => nanoid(12);
+module.exports = (size = 12) => nanoid(size);

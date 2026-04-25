@@ -3,6 +3,7 @@ module.exports = {
     HOST_JOIN: 'host:join',
     VIEWER_JOIN: 'viewer:join',
     VIEWER_READY: 'viewer:ready',
+    VIEWER_LEFT: 'viewer:left',
     OFFER: 'webrtc:offer',
     ANSWER: 'webrtc:answer',
     ICE_CANDIDATE: 'webrtc:ice-candidate',
